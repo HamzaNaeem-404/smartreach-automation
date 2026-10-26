@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { eq, isNull, sql } from "drizzle-orm";
 import type { Database } from "@smartreach/db";
 import { auditLogs, domainEvents, outboxEvents } from "@smartreach/db";
 
@@ -68,8 +68,9 @@ export type OutboxHandler = (event: {
 }) => Promise<void>;
 
 /**
- * Claim and process unprocessed outbox rows. Marks processed_at only after
- * the handler succeeds. Safe to re-run after crashes.
+ * Atomically claim unprocessed outbox rows (SKIP LOCKED), run handlers,
+ * and leave failures reclaimable by clearing processed_at.
+ * Handlers must be idempotent — at-least-once delivery.
  */
 export async function processOutboxBatch(
   db: Database,
@@ -77,33 +78,63 @@ export async function processOutboxBatch(
   opts?: { limit?: number },
 ) {
   const limit = opts?.limit ?? 50;
-  const rows = await db
-    .select()
-    .from(outboxEvents)
-    .where(isNull(outboxEvents.processedAt))
-    .orderBy(asc(outboxEvents.createdAt))
-    .limit(limit);
+  const nowIso = new Date().toISOString();
+
+  // Claim by stamping processed_at inside the same UPDATE as SKIP LOCKED.
+  // Failures below clear processed_at so another worker can retry.
+  const claimed = await db.execute(sql`
+    UPDATE outbox_events
+    SET processed_at = ${nowIso}::timestamptz
+    WHERE id IN (
+      SELECT id FROM outbox_events
+      WHERE processed_at IS NULL
+      ORDER BY created_at ASC
+      LIMIT ${limit}
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING id, workspace_id, event_type, payload
+  `);
+
+  const claimedRows = Array.isArray(claimed)
+    ? claimed
+    : ((claimed as {
+        rows?: {
+          id: string;
+          workspace_id: string;
+          event_type: string;
+          payload: Record<string, unknown>;
+        }[];
+      })?.rows ?? []);
 
   const results: { id: string; ok: boolean; error?: string }[] = [];
 
-  for (const row of rows) {
+  for (const raw of claimedRows) {
+    const row = raw as {
+      id: string;
+      workspace_id?: string;
+      workspaceId?: string;
+      event_type?: string;
+      eventType?: string;
+      payload: Record<string, unknown>;
+    };
+    const id = row.id;
+    const workspaceId = row.workspace_id ?? row.workspaceId ?? "";
+    const eventType = row.event_type ?? row.eventType ?? "";
     try {
       await handler({
-        id: row.id,
-        workspaceId: row.workspaceId,
-        eventType: row.eventType,
+        id,
+        workspaceId,
+        eventType,
         payload: (row.payload ?? {}) as Record<string, unknown>,
       });
+      results.push({ id, ok: true });
+    } catch (err) {
       await db
         .update(outboxEvents)
-        .set({ processedAt: new Date() })
-        .where(
-          and(eq(outboxEvents.id, row.id), isNull(outboxEvents.processedAt)),
-        );
-      results.push({ id: row.id, ok: true });
-    } catch (err) {
+        .set({ processedAt: null })
+        .where(eq(outboxEvents.id, id));
       results.push({
-        id: row.id,
+        id,
         ok: false,
         error: err instanceof Error ? err.message : "unknown",
       });

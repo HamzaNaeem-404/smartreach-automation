@@ -215,6 +215,8 @@ export async function cancelScheduledAction(
       cancelledAt: new Date(),
       updatedAt: new Date(),
       reservedAt: null,
+      leaseExpiresAt: null,
+      claimedBy: null,
     })
     .where(
       and(
@@ -400,6 +402,8 @@ export async function completeScheduledAction(
       executedAt: new Date(),
       updatedAt: new Date(),
       reservedAt: null,
+      leaseExpiresAt: null,
+      claimedBy: null,
       payload: {
         ...(action.payload ?? {}),
         completionNote: input.note,
@@ -471,29 +475,43 @@ export async function deferScheduledAction(
   return updated;
 }
 
+/** Default execution lease — abandoned reserved rows become reclaimable. */
+export const CLAIM_LEASE_MS = 5 * 60_000;
+
 /**
  * Atomically claim due actions for worker processing (skip locked).
- * Does NOT send messages — marks reserved and returns rows for eligibility re-check.
- * Never blindly retries external sends when delivery is uncertain (M2: no send).
+ * Also reclaims abandoned `reserved` rows whose lease expired.
+ * At-least-once local processing; never blind-retry uncertain external sends.
  */
 export async function claimDueActions(
   db: Database,
-  opts?: { limit?: number; now?: Date },
+  opts?: { limit?: number; now?: Date; workerId?: string; leaseMs?: number },
 ) {
   const now = opts?.now ?? new Date();
   const limit = opts?.limit ?? 20;
+  const leaseMs = opts?.leaseMs ?? CLAIM_LEASE_MS;
+  const workerId = opts?.workerId ?? `worker-${process.pid}`;
   const nowIso = now.toISOString();
+  const leaseExpires = new Date(now.getTime() + leaseMs).toISOString();
 
   const result = await db.execute(sql`
     UPDATE scheduled_actions
     SET status = 'reserved',
         reserved_at = ${nowIso}::timestamptz,
+        lease_expires_at = ${leaseExpires}::timestamptz,
+        claimed_by = ${workerId},
         attempt_count = attempt_count + 1,
         updated_at = ${nowIso}::timestamptz
     WHERE id IN (
       SELECT id FROM scheduled_actions
-      WHERE status = 'pending'
-        AND due_at <= ${nowIso}::timestamptz
+      WHERE (
+          (status = 'pending' AND due_at <= ${nowIso}::timestamptz)
+          OR (
+            status = 'reserved'
+            AND lease_expires_at IS NOT NULL
+            AND lease_expires_at < ${nowIso}::timestamptz
+          )
+        )
         AND attempt_count < max_attempts
       ORDER BY due_at ASC
       LIMIT ${limit}
@@ -514,6 +532,34 @@ export async function claimDueActions(
   return db.query.scheduledActions.findMany({
     where: inArray(scheduledActions.id, ids),
   });
+}
+
+/** Release a claim without completing (e.g. failed mid-process with uncertain outcome). */
+export async function releaseClaim(
+  db: Database,
+  workspaceId: string,
+  actionId: string,
+  opts?: { toStatus?: "pending" | "awaiting_approval" | "failed"; error?: string },
+) {
+  const [updated] = await db
+    .update(scheduledActions)
+    .set({
+      status: opts?.toStatus ?? "pending",
+      reservedAt: null,
+      leaseExpiresAt: null,
+      claimedBy: null,
+      lastError: opts?.error,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(scheduledActions.id, actionId),
+        eq(scheduledActions.workspaceId, workspaceId),
+        eq(scheduledActions.status, "reserved"),
+      ),
+    )
+    .returning();
+  return updated ?? null;
 }
 
 /**
@@ -562,10 +608,18 @@ export async function processReservedAction(
 export async function listFollowUpActions(
   db: Database,
   workspaceId: string,
-  opts?: { bucket?: FollowUpQueueBucket; limit?: number; now?: Date },
+  opts?: {
+    bucket?: FollowUpQueueBucket;
+    limit?: number;
+    offset?: number;
+    now?: Date;
+    /** When true, re-run eligibility live (default for open actionable buckets). */
+    liveEligibility?: boolean;
+  },
 ) {
   const now = opts?.now ?? new Date();
-  const limit = opts?.limit ?? 100;
+  const limit = opts?.limit ?? 50;
+  const offset = opts?.offset ?? 0;
   const bucket = opts?.bucket;
 
   const base = [eq(scheduledActions.workspaceId, workspaceId)];
@@ -612,9 +666,9 @@ export async function listFollowUpActions(
     where: and(...base),
     orderBy: [asc(scheduledActions.dueAt)],
     limit,
+    offset,
   });
 
-  // Attach contact / campaign / recent activity
   const contactIds = [
     ...new Set(rows.map((r) => r.contactId).filter(Boolean) as string[]),
   ];
@@ -643,42 +697,68 @@ export async function listFollowUpActions(
         })
       : [];
 
+  // One query for recent activities across contacts (avoid N+1)
+  const recentByContact = new Map<string, (typeof channelActivities.$inferSelect)>();
+  if (contactIds.length > 0) {
+    const activities = await db.query.channelActivities.findMany({
+      where: and(
+        eq(channelActivities.workspaceId, workspaceId),
+        inArray(channelActivities.contactId, contactIds),
+      ),
+      orderBy: [desc(channelActivities.occurredAt)],
+      limit: contactIds.length * 3,
+    });
+    for (const a of activities) {
+      if (!recentByContact.has(a.contactId)) {
+        recentByContact.set(a.contactId, a);
+      }
+    }
+  }
+
   const contactMap = Object.fromEntries(contactRows.map((c) => [c.id, c]));
   const campaignMap = Object.fromEntries(campaignRows.map((c) => [c.id, c]));
 
+  const live =
+    opts?.liveEligibility ??
+    (!bucket ||
+      ["due_today", "overdue", "upcoming", "awaiting_approval", "blocked"].includes(
+        bucket,
+      ));
+
   const enriched = [];
   for (const row of rows) {
-    const eligibility = await evaluateActionEligibility(db, {
-      workspaceId,
-      enrollmentId: row.enrollmentId,
-      contactId: row.contactId,
-      campaignId: row.campaignId,
-      channel: row.channel,
-      actionType: row.actionType,
-      senderIdentityId: row.senderIdentityId,
-      status: row.status,
-      attemptCount: row.attemptCount,
-      maxAttempts: row.maxAttempts,
-      now,
-    });
-
-    let recentActivity = null;
-    if (row.contactId) {
-      recentActivity = await db.query.channelActivities.findFirst({
-        where: and(
-          eq(channelActivities.workspaceId, workspaceId),
-          eq(channelActivities.contactId, row.contactId),
-        ),
-        orderBy: [desc(channelActivities.occurredAt)],
-      });
-    }
+    const eligibility = live
+      ? await evaluateActionEligibility(db, {
+          workspaceId,
+          enrollmentId: row.enrollmentId,
+          contactId: row.contactId,
+          campaignId: row.campaignId,
+          channel: row.channel,
+          actionType: row.actionType,
+          senderIdentityId: row.senderIdentityId,
+          status: row.status,
+          attemptCount: row.attemptCount,
+          maxAttempts: row.maxAttempts,
+          now,
+        })
+      : {
+          eligible: row.status !== "cancelled" && row.status !== "failed",
+          blockingReasons: (row.blockedReasons ??
+            (row.cancelReason ? [row.cancelReason] : [])) as string[],
+          policyVersion: row.policyVersion ?? ELIGIBILITY_POLICY_VERSION,
+          evaluatedAt: now.toISOString(),
+          relatedEventRefs: [],
+          requiresHumanApproval: Boolean(row.requiresApproval),
+        };
 
     enriched.push({
       ...row,
       contact: row.contactId ? contactMap[row.contactId] ?? null : null,
       campaign: row.campaignId ? campaignMap[row.campaignId] ?? null : null,
       eligibility,
-      recentActivity,
+      recentActivity: row.contactId
+        ? recentByContact.get(row.contactId) ?? null
+        : null,
     });
   }
 

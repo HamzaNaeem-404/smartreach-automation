@@ -17,6 +17,11 @@ import {
   type EnrollmentStatus,
   type ActivityKind,
 } from "@smartreach/shared";
+import {
+  invalidateIneligibleFollowUps,
+  scheduleNextStepFollowUp,
+} from "../followups/service";
+import { appendDomainEvent } from "../events/outbox";
 
 const REPLY_KINDS = new Set(["reply_received", "replied"]);
 const DNC_KINDS = new Set(["bounced"]);
@@ -91,6 +96,14 @@ export async function createCampaign(
       channel: "email",
       name: "Intro email",
       delayDays: 2,
+    },
+    {
+      workspaceId,
+      campaignId: campaign.id,
+      stepOrder: 3,
+      channel: "email",
+      name: "Email follow-up",
+      delayDays: 3,
     },
   ]);
 
@@ -264,11 +277,24 @@ export async function recordActivity(
   if (!enrollmentId && input.campaignId) {
     const enrollment = await db.query.campaignEnrollments.findFirst({
       where: and(
+        eq(campaignEnrollments.workspaceId, workspaceId),
         eq(campaignEnrollments.campaignId, input.campaignId),
         eq(campaignEnrollments.contactId, input.contactId),
       ),
     });
     enrollmentId = enrollment?.id;
+  }
+
+  if (enrollmentId) {
+    const enrollment = await db.query.campaignEnrollments.findFirst({
+      where: and(
+        eq(campaignEnrollments.id, enrollmentId),
+        eq(campaignEnrollments.workspaceId, workspaceId),
+      ),
+    });
+    if (!enrollment) {
+      throw new NotFoundError("Enrollment");
+    }
   }
 
   const [activity] = await db
@@ -311,20 +337,53 @@ export async function recordActivity(
     await db
       .update(campaignEnrollments)
       .set(patch)
-      .where(eq(campaignEnrollments.id, enrollmentId));
+      .where(
+        and(
+          eq(campaignEnrollments.id, enrollmentId),
+          eq(campaignEnrollments.workspaceId, workspaceId),
+        ),
+      );
+
+    // Reply / bounce / DNC must cancel ineligible follow-ups
+    if (REPLY_KINDS.has(input.kind) || DNC_KINDS.has(input.kind)) {
+      await invalidateIneligibleFollowUps(db, workspaceId, {
+        enrollmentId,
+        contactId: input.contactId,
+        reason: `activity:${input.channel}:${input.kind}`,
+        actorUserId: input.recordedByUserId,
+      });
+    }
+
+    // After a successful email send, schedule the next campaign step (follow-up)
+    if (input.channel === "email" && input.kind === "sent") {
+      const metaStepOrder =
+        typeof input.metadata?.stepOrder === "number"
+          ? input.metadata.stepOrder
+          : 2;
+      await scheduleNextStepFollowUp(db, workspaceId, {
+        enrollmentId,
+        afterStepOrder: metaStepOrder,
+        fromTime: activity.occurredAt,
+        actorUserId: input.recordedByUserId,
+      });
+    }
+
+    // After LinkedIn invite sent, do not auto-cancel email sequence
+    // (cross-channel cancel only when policy enabled in eligibility).
   }
 
-  await db.insert(auditLogs).values({
+  await appendDomainEvent(db, {
     workspaceId,
-    actorUserId: input.recordedByUserId,
-    action: "activity.recorded",
-    entityType: "channel_activity",
-    entityId: activity.id,
-    metadata: {
+    eventType: "activity.recorded",
+    aggregateType: "channel_activity",
+    aggregateId: activity.id,
+    payload: {
       channel: input.channel,
       kind: input.kind,
       contactId: input.contactId,
+      enrollmentId,
     },
+    actorUserId: input.recordedByUserId,
   });
 
   return { activity, duplicate: false };

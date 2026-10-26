@@ -9,7 +9,12 @@
     "./crm": "./src/crm/index.ts",
     "./campaigns": "./src/campaigns/index.ts",
     "./auth": "./src/auth/index.ts",
-    "./dashboard": "./src/dashboard/index.ts"
+    "./dashboard": "./src/dashboard/index.ts",
+    "./followups": "./src/followups/index.ts",
+    "./events": "./src/events/index.ts",
+    "./scoring": "./src/scoring/index.ts",
+    "./jobs": "./src/jobs/index.ts",
+    "./enrichment": "./src/enrichment/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

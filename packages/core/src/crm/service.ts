@@ -7,6 +7,7 @@ import {
   companyContactRelationships,
   jobPostings,
   channelActivities,
+  scheduledActions,
 } from "@smartreach/db";
 import {
   normalizeContactMethodValue,
@@ -302,19 +303,89 @@ export async function linkContactToCompany(
     .onConflictDoNothing();
 }
 
+export type TimelineItem =
+  | {
+      kind: "activity";
+      id: string;
+      channel: string;
+      activityKind: string;
+      subject: string | null;
+      body: string | null;
+      /** Effective event time (provider/occurred), not insert order */
+      effectiveAt: Date;
+      recordedAt: Date;
+      status?: undefined;
+      cancelReason?: undefined;
+    }
+  | {
+      kind: "scheduled_action";
+      id: string;
+      channel: string | null;
+      activityKind: string;
+      subject: string | null;
+      body: string | null;
+      effectiveAt: Date;
+      recordedAt: Date;
+      status: string;
+      cancelReason: string | null;
+    };
+
+/**
+ * Unified prospect timeline across channels + scheduled follow-ups.
+ * Ordered by effective timestamp (occurredAt / dueAt / cancelledAt), not
+ * insertion order — late-arriving provider events sort correctly.
+ */
 export async function getContactTimeline(
   db: Database,
   workspaceId: string,
   contactId: string,
-) {
+): Promise<TimelineItem[]> {
   await getContact(db, workspaceId, contactId);
-  return db.query.channelActivities.findMany({
+
+  const activities = await db.query.channelActivities.findMany({
     where: and(
       eq(channelActivities.workspaceId, workspaceId),
       eq(channelActivities.contactId, contactId),
     ),
-    orderBy: [desc(channelActivities.occurredAt)],
   });
+
+  const actions = await db.query.scheduledActions.findMany({
+    where: and(
+      eq(scheduledActions.workspaceId, workspaceId),
+      eq(scheduledActions.contactId, contactId),
+    ),
+  });
+
+  const items: TimelineItem[] = [
+    ...activities.map((a) => ({
+      kind: "activity" as const,
+      id: a.id,
+      channel: a.channel,
+      activityKind: a.kind,
+      subject: a.subject,
+      body: a.body,
+      effectiveAt: a.occurredAt,
+      recordedAt: a.createdAt,
+    })),
+    ...actions.map((a) => ({
+      kind: "scheduled_action" as const,
+      id: a.id,
+      channel: a.channel,
+      activityKind: a.actionType,
+      subject: `Follow-up (${a.status})`,
+      body: a.cancelReason
+        ? `Cancelled: ${a.cancelReason}`
+        : ((a.payload as { stepName?: string } | null)?.stepName ?? null),
+      effectiveAt:
+        a.cancelledAt ?? a.completedAt ?? a.executedAt ?? a.dueAt ?? a.createdAt,
+      recordedAt: a.createdAt,
+      status: a.status,
+      cancelReason: a.cancelReason,
+    })),
+  ];
+
+  items.sort((a, b) => b.effectiveAt.getTime() - a.effectiveAt.getTime());
+  return items;
 }
 
 export async function listJobPostings(db: Database, workspaceId: string) {

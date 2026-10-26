@@ -3,3 +3,8 @@ export * from "./import/index";
 export * from "./crm/index";
 export * from "./campaigns/index";
 export * from "./dashboard/index";
+export * from "./followups/index";
+export * from "./events/index";
+export * from "./scoring/index";
+export * from "./jobs/index";
+export * from "./enrichment/index";

@@ -1,0 +1,20 @@
+[
+  {
+    "channel": "linkedin",
+    "kind": "invitation_sent",
+    "subject": "Connection request sent",
+    "idempotencyKey": "fixture:linkedin:invite:1"
+  },
+  {
+    "channel": "linkedin",
+    "kind": "invitation_accepted",
+    "subject": "Connection accepted",
+    "idempotencyKey": "fixture:linkedin:accept:1"
+  },
+  {
+    "channel": "linkedin",
+    "kind": "reply_received",
+    "body": "Thanks for reaching out — happy to chat next week.",
+    "idempotencyKey": "fixture:linkedin:reply:1"
+  }
+]

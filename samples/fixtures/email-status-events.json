@@ -1,0 +1,27 @@
+[
+  {
+    "channel": "email",
+    "kind": "draft",
+    "subject": "Intro — backend hiring",
+    "body": "Draft only — not sent.",
+    "idempotencyKey": "fixture:email:draft:1"
+  },
+  {
+    "channel": "email",
+    "kind": "sent",
+    "subject": "Intro — backend hiring",
+    "idempotencyKey": "fixture:email:sent:1"
+  },
+  {
+    "channel": "email",
+    "kind": "replied",
+    "subject": "Re: Intro — backend hiring",
+    "idempotencyKey": "fixture:email:reply:1"
+  },
+  {
+    "channel": "email",
+    "kind": "bounced",
+    "subject": "Delivery failed",
+    "idempotencyKey": "fixture:email:bounce:1"
+  }
+]

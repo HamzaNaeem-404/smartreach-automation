@@ -8,3 +8,5 @@ export * from "./events/index";
 export * from "./scoring/index";
 export * from "./jobs/index";
 export * from "./enrichment/index";
+export * from "./suppressions/index";
+export * from "./ops/index";

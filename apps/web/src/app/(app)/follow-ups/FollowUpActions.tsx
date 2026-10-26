@@ -7,14 +7,23 @@ export function FollowUpActions({
   actionId,
   status,
   eligible,
+  blockingReasons,
+  recentActivity,
+  canApprove,
+  canCancel,
 }: {
   actionId: string;
   status: string;
   eligible: boolean;
+  blockingReasons?: string[];
+  recentActivity?: { channel: string; kind: string } | null;
+  canApprove?: boolean;
+  canCancel?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   async function run(op: string, extra?: Record<string, unknown>) {
     setBusy(true);
@@ -41,8 +50,32 @@ export function FollowUpActions({
 
   return (
     <div className="stack" style={{ gap: 4 }}>
+      <button
+        className="btn secondary"
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        {expanded ? "Hide detail" : "Inspect"}
+      </button>
+      {expanded ? (
+        <div className="muted" style={{ fontSize: "0.85rem" }}>
+          <div>
+            Eligibility:{" "}
+            {eligible
+              ? "eligible"
+              : (blockingReasons ?? []).join(", ") || "blocked"}
+          </div>
+          <div>
+            Recent:{" "}
+            {recentActivity
+              ? `${recentActivity.channel}:${recentActivity.kind}`
+              : "—"}
+          </div>
+        </div>
+      ) : null}
       <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-        {status === "awaiting_approval" || status === "blocked" ? (
+        {canApprove &&
+        (status === "awaiting_approval" || status === "blocked") ? (
           <button
             className="btn secondary"
             type="button"
@@ -62,7 +95,7 @@ export function FollowUpActions({
             Complete
           </button>
         ) : null}
-        {!terminal ? (
+        {canApprove && !terminal ? (
           <button
             className="btn secondary"
             type="button"
@@ -77,15 +110,29 @@ export function FollowUpActions({
             Defer 1d
           </button>
         ) : null}
-        {!terminal ? (
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={busy}
-            onClick={() => void run("cancel", { reason: "operator_cancelled" })}
-          >
-            Cancel
-          </button>
+        {canCancel && !terminal ? (
+          <>
+            <button
+              className="btn secondary"
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run("reject", { reason: "operator_rejected" })
+              }
+            >
+              Reject
+            </button>
+            <button
+              className="btn secondary"
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run("cancel", { reason: "operator_cancelled" })
+              }
+            >
+              Cancel
+            </button>
+          </>
         ) : null}
       </div>
       {message ? <span className="muted">{message}</span> : null}

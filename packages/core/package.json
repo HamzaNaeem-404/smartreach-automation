@@ -14,7 +14,9 @@
     "./events": "./src/events/index.ts",
     "./scoring": "./src/scoring/index.ts",
     "./jobs": "./src/jobs/index.ts",
-    "./enrichment": "./src/enrichment/index.ts"
+    "./enrichment": "./src/enrichment/index.ts",
+    "./suppressions": "./src/suppressions/index.ts",
+    "./ops": "./src/ops/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

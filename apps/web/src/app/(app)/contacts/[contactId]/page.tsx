@@ -1,6 +1,11 @@
 import Link from "next/link";
-import { getContact, getContactTimeline, listCampaigns } from "@smartreach/core";
-import { requireSession } from "@/lib/auth";
+import {
+  getContact,
+  getContactTimeline,
+  getContactSuppressions,
+  listCampaigns,
+} from "@smartreach/core";
+import { requirePermission } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ContactActions } from "./ContactActions";
 
@@ -9,12 +14,13 @@ export default async function ContactDetailPage({
 }: {
   params: Promise<{ contactId: string }>;
 }) {
-  const session = await requireSession();
+  const session = await requirePermission("contacts:read");
   const { contactId } = await params;
-  const [contact, timeline, campaigns] = await Promise.all([
+  const [contact, timeline, campaigns, suppressions] = await Promise.all([
     getContact(db, session.workspaceId, contactId),
     getContactTimeline(db, session.workspaceId, contactId),
     listCampaigns(db, session.workspaceId),
+    getContactSuppressions(db, session.workspaceId, contactId),
   ]);
 
   return (
@@ -27,6 +33,12 @@ export default async function ContactDetailPage({
             {contact.relationships?.[0]?.company
               ? ` · ${contact.relationships[0].company.name}`
               : ""}
+            {suppressions.length > 0 ? (
+              <>
+                {" "}
+                · <span className="badge muted">suppressed</span>
+              </>
+            ) : null}
           </p>
         </div>
         <Link className="btn secondary" href="/contacts">
@@ -44,6 +56,23 @@ export default async function ContactDetailPage({
               </li>
             ))}
           </ul>
+        </div>
+
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Suppression status</h2>
+          {suppressions.length === 0 ? (
+            <p className="muted">Not suppressed.</p>
+          ) : (
+            <ul>
+              {suppressions.map((s) => (
+                <li key={s.id}>
+                  <span className="badge">{s.channel}</span>{" "}
+                  <span className="badge muted">{s.origin}</span> {s.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link href="/suppressions">Manage suppressions</Link>
         </div>
 
         <ContactActions

@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { listFollowUpActions } from "@smartreach/core";
-import { FollowUpQueueBuckets } from "@smartreach/shared";
-import { requireSession } from "@/lib/auth";
+import {
+  FollowUpQueueBuckets,
+  roleHasPermission,
+} from "@smartreach/shared";
+import { requirePermission } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { FollowUpActions } from "./FollowUpActions";
 
@@ -10,7 +13,7 @@ export default async function FollowUpsPage({
 }: {
   searchParams: Promise<{ bucket?: string }>;
 }) {
-  const session = await requireSession();
+  const session = await requirePermission("followups:read");
   const params = await searchParams;
   const bucketParam = params.bucket;
   const bucket =
@@ -21,8 +24,11 @@ export default async function FollowUpsPage({
 
   const queue = await listFollowUpActions(db, session.workspaceId, {
     bucket,
-    limit: 100,
+    limit: 50,
   });
+
+  const canApprove = roleHasPermission(session.role, "followups:approve");
+  const canCancel = roleHasPermission(session.role, "followups:cancel");
 
   return (
     <div>
@@ -126,6 +132,10 @@ export default async function FollowUpsPage({
                         actionId={item.id}
                         status={item.status}
                         eligible={item.eligibility?.eligible ?? false}
+                        blockingReasons={item.eligibility?.blockingReasons}
+                        recentActivity={item.recentActivity}
+                        canApprove={canApprove}
+                        canCancel={canCancel}
                       />
                     </td>
                   </tr>

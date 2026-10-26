@@ -1,10 +1,15 @@
-import { getDashboardStats } from "@smartreach/core";
+import { getDashboardStats, getOperationalMetrics } from "@smartreach/core";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export default async function DashboardPage() {
   const session = await requireSession();
-  const stats = await getDashboardStats(db, session.workspaceId);
+  const [stats, ops] = await Promise.all([
+    getDashboardStats(db, session.workspaceId),
+    session.role === "owner" || session.role === "admin"
+      ? getOperationalMetrics(db, session.workspaceId)
+      : null,
+  ]);
 
   return (
     <div>
@@ -30,6 +35,24 @@ export default async function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {ops ? (
+        <div className="grid-stats" style={{ marginTop: 12 }}>
+          {[
+            ["Pending follow-ups", ops.scheduledActions.pending],
+            ["Awaiting approval", ops.scheduledActions.awaitingApproval],
+            ["Overdue", ops.scheduledActions.overdue],
+            ["Stale claims", ops.scheduledActions.staleClaims],
+            ["Outbox backlog", ops.outboxBacklog],
+            ["Active suppressions", ops.activeSuppressions],
+          ].map(([label, value]) => (
+            <div className="stat" key={String(label)}>
+              <div className="label">{label}</div>
+              <div className="value">{value}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="stack">
         <div className="card">

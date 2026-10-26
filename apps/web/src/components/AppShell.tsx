@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/contacts", label: "Contacts" },
   { href: "/campaigns", label: "Campaigns" },
   { href: "/follow-ups", label: "Follow-up Queue" },
+  { href: "/suppressions", label: "Suppressions" },
   { href: "/settings/senders", label: "Sender Identities" },
 ];
 

@@ -16,6 +16,8 @@ import {
   normalizeLinkedInUrl,
   normalizeName,
   NotFoundError,
+  parseSourceTimestamp,
+  parsedTimestampToMetadata,
   splitFullName,
   ValidationError,
   type CanonicalCsvField,
@@ -82,7 +84,10 @@ export async function createImportBatch(
   },
 ) {
   const { headers, rows } = parseCsv(input.content);
-  let mapping = autoMapColumns(headers) as Record<string, string | null>;
+  let mapping = autoMapColumns(headers, input.sourceKey) as Record<
+    string,
+    string | null
+  >;
 
   if (input.sourceKey) {
     const template = await db.query.mappingTemplates.findFirst({
@@ -202,6 +207,8 @@ export async function confirmMappingAndProcess(
     workspaceId: input.workspaceId,
     batchId: batch.id,
     mapping: input.mapping,
+    observationTime: batch.createdAt ?? new Date(),
+    sourceKey: batch.sourceKey,
   });
 
   const [updated] = await db
@@ -257,6 +264,8 @@ export async function processImportRows(
     workspaceId: string;
     batchId: string;
     mapping: Record<string, string | null>;
+    observationTime?: Date;
+    sourceKey?: string | null;
   },
 ): Promise<ImportStats> {
   const stats = emptyStats();
@@ -266,6 +275,7 @@ export async function processImportRows(
   });
 
   stats.totalRows = rows.length;
+  const observationTime = input.observationTime ?? new Date();
 
   for (const row of rows) {
     try {
@@ -274,6 +284,8 @@ export async function processImportRows(
         workspaceId: input.workspaceId,
         normalized,
         stats,
+        observationTime,
+        sourceKey: input.sourceKey,
       });
 
       await db
@@ -311,6 +323,8 @@ async function upsertFromNormalizedRow(
     workspaceId: string;
     normalized: Record<CanonicalCsvField, string | null>;
     stats: ImportStats;
+    observationTime: Date;
+    sourceKey?: string | null;
   },
 ): Promise<{
   companyId: string | null;
@@ -319,12 +333,17 @@ async function upsertFromNormalizedRow(
   wasDuplicate: boolean;
   fuzzyCandidate: boolean;
 }> {
-  const { workspaceId, normalized, stats } = input;
+  const { workspaceId, normalized, stats, observationTime } = input;
   let companyId: string | null = null;
   let contactId: string | null = null;
   let jobPostingId: string | null = null;
   let wasDuplicate = false;
   let fuzzyCandidate = false;
+
+  const discoveredParsed = parseSourceTimestamp(
+    normalized.discoveredAt,
+    observationTime,
+  );
 
   if (normalized.companyName) {
     const normalizedName = normalizeName(normalized.companyName);
@@ -367,19 +386,24 @@ async function upsertFromNormalizedRow(
     }
 
     if (!jobPostingId) {
+      const discoveredAt =
+        discoveredParsed.absolute ??
+        (discoveredParsed.status === "null" ? observationTime : null);
+
       const [job] = await db
         .insert(jobPostings)
         .values({
           workspaceId,
           companyId,
           title: normalized.jobTitle,
-          source: normalized.source,
+          source: normalized.source ?? input.sourceKey ?? null,
           sourceUrl: normalized.jobUrl,
           location: normalized.location,
-          discoveredAt: normalized.discoveredAt
-            ? new Date(normalized.discoveredAt)
-            : new Date(),
-          rawMetadata: { ...normalized },
+          discoveredAt,
+          rawMetadata: {
+            ...normalized,
+            discoveredAtParse: parsedTimestampToMetadata(discoveredParsed),
+          },
         })
         .onConflictDoNothing()
         .returning();
@@ -388,6 +412,7 @@ async function upsertFromNormalizedRow(
         jobPostingId = job.id;
         stats.jobPostingsCreated += 1;
       } else if (normalized.jobUrl) {
+        // Re-import: keep original discoveredAt (do not recompute relative times)
         const existingJob = await db.query.jobPostings.findFirst({
           where: and(
             eq(jobPostings.workspaceId, workspaceId),
@@ -396,6 +421,10 @@ async function upsertFromNormalizedRow(
         });
         jobPostingId = existingJob?.id ?? null;
       }
+    } else {
+      // Existing job matched by URL — never overwrite discoveredAt with a
+      // freshly resolved relative timestamp.
+      wasDuplicate = true;
     }
   }
 

@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   integer,
   jsonb,
@@ -162,6 +162,21 @@ export const suppressionScopeEnum = pgEnum("suppression_scope", [
   "campaign",
 ]);
 
+/** all = both channels; email / linkedin = channel-specific */
+export const suppressionChannelEnum = pgEnum("suppression_channel", [
+  "all",
+  "email",
+  "linkedin",
+]);
+
+export const suppressionOriginEnum = pgEnum("suppression_origin", [
+  "manual",
+  "unsubscribe",
+  "hard_bounce",
+  "import",
+  "system",
+]);
+
 export const suppressionEntries = pgTable(
   "suppression_entries",
   {
@@ -170,6 +185,8 @@ export const suppressionEntries = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     scope: suppressionScopeEnum("scope").notNull().default("global"),
+    channel: suppressionChannelEnum("channel").notNull().default("all"),
+    origin: suppressionOriginEnum("origin").notNull().default("manual"),
     campaignId: uuid("campaign_id").references(() => campaigns.id, {
       onDelete: "cascade",
     }),
@@ -179,12 +196,24 @@ export const suppressionEntries = pgTable(
     email: text("email"),
     linkedinUrl: text("linkedin_url"),
     reason: text("reason"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => [
     index("suppression_ws_idx").on(t.workspaceId, t.scope),
+    index("suppression_ws_contact_idx").on(t.workspaceId, t.contactId),
+    index("suppression_ws_email_idx").on(t.workspaceId, t.email),
+    uniqueIndex("suppression_contact_channel_uidx")
+      .on(t.workspaceId, t.contactId, t.channel, t.scope)
+      .where(sql`${t.deletedAt} IS NULL AND ${t.contactId} IS NOT NULL`),
   ],
 );
 

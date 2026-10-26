@@ -95,6 +95,9 @@ export const scheduledActions = pgTable(
     maxAttempts: integer("max_attempts").notNull().default(3),
     lastError: text("last_error"),
     reservedAt: timestamp("reserved_at", { withTimezone: true }),
+    /** Worker instance / lease owner for abandoned-claim recovery */
+    claimedBy: text("claimed_by"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -113,6 +116,8 @@ export const scheduledActions = pgTable(
     index("scheduled_actions_due_idx").on(t.status, t.dueAt),
     index("scheduled_actions_ws_status_idx").on(t.workspaceId, t.status, t.dueAt),
     index("scheduled_actions_enrollment_idx").on(t.enrollmentId, t.status),
+    index("scheduled_actions_ws_contact_idx").on(t.workspaceId, t.contactId),
+    index("scheduled_actions_lease_idx").on(t.status, t.leaseExpiresAt),
   ],
 );
 

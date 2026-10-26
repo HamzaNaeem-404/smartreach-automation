@@ -77,16 +77,33 @@ export const scheduledActions = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     enrollmentId: uuid("enrollment_id"),
     contactId: uuid("contact_id"),
+    campaignId: uuid("campaign_id"),
+    stepId: uuid("step_id"),
+    senderIdentityId: uuid("sender_identity_id"),
     channel: text("channel"),
     actionType: text("action_type").notNull(),
+    /** pending | awaiting_approval | reserved | blocked | cancelled | completed | failed */
     status: text("status").notNull().default("pending"),
     dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>(),
+    blockedReasons: jsonb("blocked_reasons").$type<string[]>(),
+    cancelReason: text("cancel_reason"),
+    policyVersion: text("policy_version"),
+    requiresApproval: integer("requires_approval").notNull().default(1),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    lastError: text("last_error"),
+    reservedAt: timestamp("reserved_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
     executedAt: timestamp("executed_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (t) => [
     uniqueIndex("scheduled_actions_idem_uidx").on(
@@ -94,6 +111,8 @@ export const scheduledActions = pgTable(
       t.idempotencyKey,
     ),
     index("scheduled_actions_due_idx").on(t.status, t.dueAt),
+    index("scheduled_actions_ws_status_idx").on(t.workspaceId, t.status, t.dueAt),
+    index("scheduled_actions_enrollment_idx").on(t.enrollmentId, t.status),
   ],
 );
 

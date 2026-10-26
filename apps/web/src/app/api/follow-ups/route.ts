@@ -5,19 +5,20 @@ import {
   completeScheduledAction,
   cancelScheduledAction,
   deferScheduledAction,
+  evaluateScheduledAction,
 } from "@smartreach/core";
 import {
   FollowUpQueueBuckets,
   scheduleFollowUpSchema,
   followUpActionSchema,
 } from "@smartreach/shared";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { jsonError, jsonOk } from "@/lib/api";
 
 export async function GET(request: Request) {
   try {
-    const session = await requireSession();
+    const session = await requirePermission("followups:read");
     const url = new URL(request.url);
     const bucketParam = url.searchParams.get("bucket");
     const bucket =
@@ -28,9 +29,10 @@ export async function GET(request: Request) {
 
     const queue = await listFollowUpActions(db, session.workspaceId, {
       bucket,
-      limit: 100,
+      limit: Number(url.searchParams.get("limit") ?? 50),
+      offset: Number(url.searchParams.get("offset") ?? 0),
     });
-    return jsonOk({ queue, bucket: bucket ?? "all" });
+    return jsonOk({ queue, bucket: bucket ?? "all", role: session.role });
   } catch (err) {
     return jsonError(err);
   }
@@ -38,11 +40,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireSession();
     const body = await request.json();
     const action = body?.op as string | undefined;
 
     if (action === "schedule" || !action) {
+      const session = await requirePermission("followups:schedule");
       const parsed = scheduleFollowUpSchema.parse(body);
       const result = await scheduleFollowUp(db, session.workspaceId, {
         enrollmentId: parsed.enrollmentId,
@@ -62,16 +64,31 @@ export async function POST(request: Request) {
     const parsed = followUpActionSchema.parse(body);
 
     if (action === "approve") {
+      const session = await requirePermission("followups:approve");
+      // Revalidate eligibility at approval time
+      const evaluated = await evaluateScheduledAction(
+        db,
+        session.workspaceId,
+        parsed.actionId,
+      );
+      if (!evaluated.eligible) {
+        return jsonError(
+          new Error(
+            `Not eligible: ${evaluated.blockingReasons.join(", ")}`,
+          ),
+        );
+      }
       const updated = await approveScheduledAction(
         db,
         session.workspaceId,
         parsed.actionId,
         session.userId,
       );
-      return jsonOk({ action: updated });
+      return jsonOk({ action: updated, eligibility: evaluated });
     }
 
     if (action === "complete") {
+      const session = await requirePermission("followups:complete");
       const result = await completeScheduledAction(db, session.workspaceId, {
         actionId: parsed.actionId,
         actorUserId: session.userId,
@@ -80,16 +97,20 @@ export async function POST(request: Request) {
       return jsonOk(result);
     }
 
-    if (action === "cancel") {
+    if (action === "cancel" || action === "reject") {
+      const session = await requirePermission("followups:cancel");
       const result = await cancelScheduledAction(db, session.workspaceId, {
         actionId: parsed.actionId,
-        reason: parsed.reason ?? "operator_cancelled",
+        reason:
+          parsed.reason ??
+          (action === "reject" ? "operator_rejected" : "operator_cancelled"),
         actorUserId: session.userId,
       });
       return jsonOk(result);
     }
 
     if (action === "defer") {
+      const session = await requirePermission("followups:approve");
       if (!parsed.dueAt) {
         return jsonError(new Error("dueAt required for defer"));
       }

@@ -1,5 +1,5 @@
 import { getCampaign } from "@smartreach/core";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { jsonError, jsonOk } from "@/lib/api";
 
@@ -8,7 +8,7 @@ export async function GET(
   context: { params: Promise<{ campaignId: string }> },
 ) {
   try {
-    const session = await requireSession();
+    const session = await requirePermission("campaigns:read");
     const { campaignId } = await context.params;
     const campaign = await getCampaign(db, session.workspaceId, campaignId);
     return jsonOk({ campaign });

@@ -2,8 +2,12 @@ import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import { eq } from "drizzle-orm";
 import { users } from "@smartreach/db";
-import { verifyPassword } from "@smartreach/core";
-import { UnauthorizedError } from "@smartreach/shared";
+import { assertPermission, verifyPassword } from "@smartreach/core";
+import {
+  UnauthorizedError,
+  type Permission,
+  type WorkspaceRole,
+} from "@smartreach/shared";
 import { db } from "./db";
 
 const COOKIE_NAME = "sr_session";
@@ -19,6 +23,8 @@ export type SessionPayload = {
   email: string;
   name: string | null;
   workspaceId: string;
+  /** Present after login/refresh; always re-validated from DB in requireSession */
+  role?: WorkspaceRole;
 };
 
 export async function createSession(payload: SessionPayload) {
@@ -55,13 +61,14 @@ export async function getSession(): Promise<SessionPayload | null> {
   }
 }
 
-export async function requireSession(): Promise<SessionPayload> {
+export type AuthedSession = SessionPayload & { role: WorkspaceRole };
+
+export async function requireSession(): Promise<AuthedSession> {
   const session = await getSession();
   if (!session?.userId || !session.workspaceId) {
     throw new UnauthorizedError();
   }
 
-  // Re-validate membership on each request (JWT alone is not sufficient)
   const membership = await db.query.workspaceMembers.findFirst({
     where: (m, { and, eq: e }) =>
       and(e(m.userId, session.userId), e(m.workspaceId, session.workspaceId)),
@@ -70,6 +77,17 @@ export async function requireSession(): Promise<SessionPayload> {
     throw new UnauthorizedError("Workspace membership revoked");
   }
 
+  return {
+    ...session,
+    role: membership.role,
+  };
+}
+
+export async function requirePermission(
+  permission: Permission,
+): Promise<AuthedSession> {
+  const session = await requireSession();
+  assertPermission(session.role, permission);
   return session;
 }
 
@@ -86,8 +104,8 @@ export async function loginWithCredentials(email: string, password: string) {
   const memberships = await db.query.workspaceMembers.findMany({
     where: (m, { eq: e }) => e(m.userId, user.id),
   });
-  const workspaceId = memberships[0]?.workspaceId;
-  if (!workspaceId) {
+  const membership = memberships[0];
+  if (!membership?.workspaceId) {
     throw new UnauthorizedError("No workspace membership");
   }
 
@@ -95,10 +113,11 @@ export async function loginWithCredentials(email: string, password: string) {
     userId: user.id,
     email: user.email,
     name: user.name,
-    workspaceId,
+    workspaceId: membership.workspaceId,
+    role: membership.role,
   });
 
-  return { user, workspaceId };
+  return { user, workspaceId: membership.workspaceId, role: membership.role };
 }
 
 export async function switchWorkspace(workspaceId: string) {
@@ -112,5 +131,6 @@ export async function switchWorkspace(workspaceId: string) {
   await createSession({
     ...session,
     workspaceId,
+    role: membership.role,
   });
 }

@@ -44,7 +44,7 @@
 
 ---
 
-## Milestone 2 — Reliable workflows (in progress / first vertical slice)
+## Milestone 2 — Reliable workflows
 
 See `docs/MILESTONE_2.md` and `docs/CODE_AUDIT.md`.
 
@@ -55,11 +55,24 @@ See `docs/MILESTONE_2.md` and `docs/CODE_AUDIT.md`.
 - [x] Follow-up queue UI with operator actions
 - [x] CSV relative timestamp parsing + SimplyHired aliases
 - [x] Scoring + SimHash suggestion modules (no auto-merge)
-- [ ] Suppression management UI
-- [ ] Broader concurrent race suite (multi-worker stress)
-- [ ] Role-gated mutations
 
 **Acceptance:** follow-up never executes when hard-block holds; covered by integration tests with fake/manual completion (no live send).
+
+---
+
+## Milestone 2.1 — Operational hardening (current)
+
+See `docs/MILESTONE_2_1_PLAN.md` and `docs/MILESTONE_2_1.md`.
+
+- [x] Suppression management service + UI + bounce writers
+- [x] Role permission matrix enforced server-side
+- [x] Claim leases, abandoned reclaim, concurrent claim tests
+- [x] Outbox atomic claim / reclaimable failures
+- [x] Follow-up queue inspect / reject / RBAC-gated mutations
+- [x] Ops metrics + structured worker logs (no PII secrets)
+- [x] Indexes for suppressions / scheduled actions / leases
+
+**Acceptance:** suppression cancels open follow-ups; unauthorized roles denied; dual workers do not double-claim; recovery after lease expiry. No live email.
 
 ---
 

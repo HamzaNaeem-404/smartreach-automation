@@ -78,25 +78,27 @@ Browser → Next.js API → core service → Drizzle (Postgres)
 | Preserve import provenance | `import_batches` + `import_rows` kept even after merge |
 | Workspace isolation | All reads/writes filter `workspace_id` |
 | Channel activities are independent | Per-enrollment per-channel rows; aggregate status derived |
-| Opt-out / suppression blocks outreach | Checked before any send (M2); UI flags in M1 |
+| Opt-out / suppression blocks outreach | Eligibility + suppression service cancel open actions (M2.1) |
 | Agents never send or set eligibility | AI returns suggestions; humans approve (M4) |
 
-## Auth & multi-tenancy (M1)
+## Auth & multi-tenancy (M1 / hardened M2.1)
 
 - Session-based auth (credentials for local/dev; OAuth providers pluggable later).
 - `workspaces` + `workspace_members` with roles: `owner`, `admin`, `member`.
 - API helpers resolve session → membership → `workspaceId` before any data access.
+- Named permissions (`contacts:write`, `followups:approve`, `suppressions:write`, …) enforced with `requirePermission` / `assertPermission` on mutating routes. UI hiding is not authorization.
 
 ## Async processing
 
 - **M1**: CSV import jobs via BullMQ; small files may process inline with the same service path.
-- **M2+**: outbox publisher, follow-up due-work scheduler, email sync, webhook handlers.
+- **M2**: outbox drain, follow-up due-work claim/process (at-least-once local; no live send).
+- **M2.1**: execution leases on `scheduled_actions`; abandoned `reserved` rows reclaimed when `lease_expires_at` passes; outbox claim via atomic `UPDATE … SKIP LOCKED`.
 
 ## Observability (progressive)
 
-- Structured logs with `workspaceId`, `requestId`, `jobId`.
-- Job metrics: delayed / failed / retried (worker).
-- Audit log table for sends and critical status changes (schema in M1, writers expanded in M2).
+- Structured logs with `workspaceId`, `jobId`, `workerId` (`logOperationalEvent`); secrets and recipient fields filtered.
+- Counters: pending/overdue/stale claims, outbox backlog, failed imports, suppression-triggered cancellations (`getOperationalMetrics`).
+- Audit log + domain/outbox events for suppressions and follow-up mutations.
 
 ## Security baseline
 
@@ -110,4 +112,4 @@ Browser → Next.js API → core service → Drizzle (Postgres)
 - Vector DBs, autonomous multi-agent loops, microservices.
 - Live Gmail/Graph send until OAuth + explicit enable (M3).
 - LinkedIn browser automation (never).
-- Full follow-up dispatch engine (M2).
+- External monitoring SaaS (use DB metrics + structured logs until needed).

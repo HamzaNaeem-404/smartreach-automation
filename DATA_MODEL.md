@@ -62,7 +62,7 @@ workspaces ──< workspace_members >── users
 | `campaign_steps` | Sequence definition | ordered per campaign |
 | `campaign_enrollments` | Contact in campaign | unique `(campaign_id, contact_id)` |
 | `channel_activities` | Per-channel events | `idempotency_key` unique per workspace |
-| `suppression_entries` | Global/campaign do-not-contact | unique scope keys |
+| `suppression_entries` | Global/campaign do-not-contact | channel (`all`/`email`/`linkedin`), origin, soft-delete; unique `(workspace, contact, channel, scope)` when active |
 
 ### Email (schema early; adapters M3)
 
@@ -71,13 +71,13 @@ workspaces ──< workspace_members >── users
 | `email_threads` | Provider thread linkage |
 | `email_messages` | Messages + headers; unique provider message id per connection |
 
-### Scheduling & events (schema M1; engine M2)
+### Scheduling & events (engine M2 / hardened M2.1)
 
 | Table | Purpose | Key constraints |
 |-------|---------|-----------------|
-| `scheduled_actions` | Due work | unique `idempotency_key` |
+| `scheduled_actions` | Due work | unique `idempotency_key`; `claimed_by` + `lease_expires_at` for worker leases |
 | `domain_events` | Append-only domain facts | |
-| `outbox_events` | Reliable publish | processed_at |
+| `outbox_events` | Reliable publish | `processed_at`; claimed via `UPDATE … FOR UPDATE SKIP LOCKED` |
 | `ai_runs` | AI invocation accounting | |
 | `audit_logs` | Sensitive mutations | |
 
@@ -98,6 +98,9 @@ workspaces ──< workspace_members >── users
 - `(workspace_id, type, normalized_value)` unique on contact_methods
 - `(campaign_id, status)` on enrollments
 - `(workspace_id, idempotency_key)` unique on channel_activities
+- `(workspace_id, contact_id)` on `scheduled_actions` and `suppression_entries`
+- `(status, lease_expires_at)` on `scheduled_actions` for reclaim
+- `(workspace_id, email)` on suppressions
 - `(batch_id, row_number)` on import_rows
 
 ## Duplicate & provenance rules

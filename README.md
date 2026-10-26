@@ -8,6 +8,9 @@ TypeScript modular monolith for CSV prospect ingestion, CRM, campaign tracking, 
 - [DATA_MODEL.md](./DATA_MODEL.md)
 - [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md)
 - [Milestone 1 notes](./docs/MILESTONE_1.md)
+- [Milestone 2 notes](./docs/MILESTONE_2.md)
+- [Code audit](./docs/CODE_AUDIT.md)
+- [BD Pipeline comparison](./docs/BD_PIPELINE_COMPARISON.md)
 
 ## Prerequisites
 
@@ -54,10 +57,11 @@ pnpm dev:worker
 
 - `samples/jobs-greenhouse.csv` — familiar column names
 - `samples/jobs-alternate-schema.csv` — alternate headers (auto-mapped via aliases)
+- `samples/simplyhired-jobs.csv` / `samples/fixtures/simplyhired-sample.csv` — relative `posting_time` values (`1h`, …)
 - `samples/fixtures/*-status-events.json` — LinkedIn/email activity fixtures for manual recording
 
 ## Milestone status
 
-**Milestone 1 (current):** CRM foundation — CSV import, companies/contacts, campaigns, manual multi-channel activity, dashboard, workspace isolation.
+**Milestone 1:** CRM foundation — CSV import, companies/contacts, campaigns, manual multi-channel activity, dashboard, workspace isolation.
 
-Not yet: automated follow-ups, live email providers, AI agents.
+**Milestone 2 (partial):** durable follow-ups, eligibility engine, outbox drain, SimplyHired timestamp parsing, scoring/SimHash modules. Live email send and AI remain deferred.

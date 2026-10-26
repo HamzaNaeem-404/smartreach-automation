@@ -44,16 +44,22 @@
 
 ---
 
-## Milestone 2 — Reliable workflows
+## Milestone 2 — Reliable workflows (in progress / first vertical slice)
 
-- Domain event writers + outbox processor.
-- `scheduled_actions` due-work scheduler.
-- Eligibility checks (opt-out, reply, suppression, limits, windows).
-- Cancellation when state changes.
-- Audit logs for status transitions.
-- Idempotent job patterns and retry observability.
+See `docs/MILESTONE_2.md` and `docs/CODE_AUDIT.md`.
 
-**Acceptance:** follow-up never dispatches when any hard-block condition holds; duplicate job runs do not double-send.
+- [x] Domain event writers + outbox drain worker
+- [x] `scheduled_actions` due-work claim/process (DB source of truth)
+- [x] Eligibility checks (suppression, reply, bounce, enrollment, campaign, sender, windows)
+- [x] Cancellation when reply/bounce recorded
+- [x] Follow-up queue UI with operator actions
+- [x] CSV relative timestamp parsing + SimplyHired aliases
+- [x] Scoring + SimHash suggestion modules (no auto-merge)
+- [ ] Suppression management UI
+- [ ] Broader concurrent race suite (multi-worker stress)
+- [ ] Role-gated mutations
+
+**Acceptance:** follow-up never executes when hard-block holds; covered by integration tests with fake/manual completion (no live send).
 
 ---
 

@@ -112,3 +112,21 @@ export const followUpActionSchema = z.object({
   dueAt: z.string().datetime().optional(),
   reason: z.string().max(500).optional(),
 });
+
+export const createSuppressionSchema = z.object({
+  scope: z.enum(["global", "campaign"]).default("global"),
+  channel: z.enum(["all", "email", "linkedin"]).default("all"),
+  origin: z
+    .enum(["manual", "unsubscribe", "hard_bounce", "import", "system"])
+    .default("manual"),
+  campaignId: z.string().uuid().optional(),
+  contactId: z.string().uuid().optional(),
+  email: z.string().email().optional(),
+  linkedinUrl: z.string().url().optional(),
+  reason: z.string().min(1).max(500),
+});
+
+export const removeSuppressionSchema = z.object({
+  suppressionId: z.string().uuid(),
+  reason: z.string().max(500).optional(),
+});

@@ -1,9 +1,10 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import type { Database } from "@smartreach/db";
 import {
   campaigns,
   campaignEnrollments,
   channelActivities,
+  contactMethods,
   senderIdentities,
   suppressionEntries,
   scheduledActions,
@@ -77,28 +78,63 @@ export async function evaluateActionEligibility(
     blockingReasons.push("action_already_terminal");
   }
 
-  if (
-    (input.attemptCount ?? 0) >= (input.maxAttempts ?? 3) &&
-    input.status === "reserved"
-  ) {
+  // Attempts are incremented on claim; block only when attempts already exhausted
+  // before this processing cycle (attemptCount > maxAttempts after increment).
+  if ((input.attemptCount ?? 0) > (input.maxAttempts ?? 3)) {
     blockingReasons.push("retry_limit_exceeded");
   }
 
   const contactId = input.contactId;
   const channel = input.channel;
 
+  // Collect contact email/linkedin for method-based suppression matches
+  let contactEmail: string | null = null;
+  let contactLinkedin: string | null = null;
   if (contactId) {
-    const suppressions = await db.query.suppressionEntries.findMany({
+    const methods = await db.query.contactMethods.findMany({
       where: and(
-        eq(suppressionEntries.workspaceId, input.workspaceId),
-        eq(suppressionEntries.contactId, contactId),
+        eq(contactMethods.workspaceId, input.workspaceId),
+        eq(contactMethods.contactId, contactId),
       ),
+    });
+    contactEmail =
+      methods.find((m) => m.type === "email")?.normalizedValue ?? null;
+    contactLinkedin =
+      methods.find((m) => m.type === "linkedin")?.normalizedValue ?? null;
+  }
+
+  const suppressionConditions = [
+    eq(suppressionEntries.workspaceId, input.workspaceId),
+    isNull(suppressionEntries.deletedAt),
+  ];
+  const identityOr = [];
+  if (contactId) identityOr.push(eq(suppressionEntries.contactId, contactId));
+  if (contactEmail) identityOr.push(eq(suppressionEntries.email, contactEmail));
+  if (contactLinkedin) {
+    identityOr.push(eq(suppressionEntries.linkedinUrl, contactLinkedin));
+  }
+
+  if (identityOr.length > 0) {
+    const suppressions = await db.query.suppressionEntries.findMany({
+      where: and(...suppressionConditions, or(...identityOr)!),
     });
 
     for (const s of suppressions) {
+      const channelMatch =
+        s.channel === "all" ||
+        !channel ||
+        s.channel === channel ||
+        (s.channel === "email" && channel === "email") ||
+        (s.channel === "linkedin" && channel === "linkedin");
+      if (!channelMatch) continue;
+
       relatedEventRefs.push(`suppression:${s.id}`);
       if (s.scope === "global") {
-        blockingReasons.push("global_do_not_contact");
+        blockingReasons.push(
+          s.channel === "all"
+            ? "global_do_not_contact"
+            : "channel_suppression",
+        );
       } else if (
         s.scope === "campaign" &&
         input.campaignId &&

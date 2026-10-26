@@ -22,6 +22,7 @@ import {
   scheduleNextStepFollowUp,
 } from "../followups/service";
 import { appendDomainEvent } from "../events/outbox";
+import { createSuppression } from "../suppressions/service";
 
 const REPLY_KINDS = new Set(["reply_received", "replied"]);
 const DNC_KINDS = new Set(["bounced"]);
@@ -344,16 +345,6 @@ export async function recordActivity(
         ),
       );
 
-    // Reply / bounce / DNC must cancel ineligible follow-ups
-    if (REPLY_KINDS.has(input.kind) || DNC_KINDS.has(input.kind)) {
-      await invalidateIneligibleFollowUps(db, workspaceId, {
-        enrollmentId,
-        contactId: input.contactId,
-        reason: `activity:${input.channel}:${input.kind}`,
-        actorUserId: input.recordedByUserId,
-      });
-    }
-
     // After a successful email send, schedule the next campaign step (follow-up)
     if (input.channel === "email" && input.kind === "sent") {
       const metaStepOrder =
@@ -367,9 +358,28 @@ export async function recordActivity(
         actorUserId: input.recordedByUserId,
       });
     }
+  }
 
-    // After LinkedIn invite sent, do not auto-cancel email sequence
-    // (cross-channel cancel only when policy enabled in eligibility).
+  // Reply / bounce cancel open follow-ups even without enrollment context
+  if (REPLY_KINDS.has(input.kind) || DNC_KINDS.has(input.kind)) {
+    await invalidateIneligibleFollowUps(db, workspaceId, {
+      enrollmentId: enrollmentId ?? undefined,
+      contactId: input.contactId,
+      reason: `activity:${input.channel}:${input.kind}`,
+      actorUserId: input.recordedByUserId,
+    });
+  }
+
+  // Hard bounce → durable email suppression
+  if (input.channel === "email" && input.kind === "bounced") {
+    await createSuppression(db, workspaceId, {
+      contactId: input.contactId,
+      channel: "email",
+      origin: "hard_bounce",
+      scope: "global",
+      reason: input.subject ?? "Hard bounce recorded",
+      actorUserId: input.recordedByUserId,
+    });
   }
 
   await appendDomainEvent(db, {

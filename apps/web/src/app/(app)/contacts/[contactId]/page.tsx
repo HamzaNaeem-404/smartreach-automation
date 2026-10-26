@@ -58,15 +58,25 @@ export default async function ContactDetailPage({
           ) : (
             <div className="timeline">
               {timeline.map((a) => (
-                <div className="timeline-item" key={a.id}>
+                <div className="timeline-item" key={`${a.kind}-${a.id}`}>
                   <div className="row">
-                    <span className="badge">{a.channel}</span>
-                    <strong>{a.kind}</strong>
+                    <span className="badge">{a.channel ?? "system"}</span>
+                    <span className="badge muted">{a.kind}</span>
+                    <strong>{a.activityKind}</strong>
+                    {a.status ? (
+                      <span className="badge muted">{a.status}</span>
+                    ) : null}
                   </div>
                   {a.subject ? <div>{a.subject}</div> : null}
                   {a.body ? <div className="muted">{a.body}</div> : null}
                   <div className="meta">
-                    {new Date(a.occurredAt).toLocaleString()}
+                    {new Date(a.effectiveAt).toLocaleString()}
+                    {a.recordedAt.getTime() !== a.effectiveAt.getTime() ? (
+                      <span className="muted">
+                        {" "}
+                        · recorded {new Date(a.recordedAt).toLocaleString()}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               ))}

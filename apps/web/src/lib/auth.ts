@@ -60,6 +60,16 @@ export async function requireSession(): Promise<SessionPayload> {
   if (!session?.userId || !session.workspaceId) {
     throw new UnauthorizedError();
   }
+
+  // Re-validate membership on each request (JWT alone is not sufficient)
+  const membership = await db.query.workspaceMembers.findFirst({
+    where: (m, { and, eq: e }) =>
+      and(e(m.userId, session.userId), e(m.workspaceId, session.workspaceId)),
+  });
+  if (!membership) {
+    throw new UnauthorizedError("Workspace membership revoked");
+  }
+
   return session;
 }
 

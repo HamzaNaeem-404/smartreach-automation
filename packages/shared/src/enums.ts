@@ -69,7 +69,14 @@ export type SenderIdentityStatus = (typeof SenderIdentityStatuses)[number];
 export const SuppressionScopes = ["global", "campaign"] as const;
 export type SuppressionScope = (typeof SuppressionScopes)[number];
 
-/** Familiar CSV column aliases → canonical fields */
+/**
+ * Familiar CSV column aliases → canonical fields.
+ * Order within each list is preference for documentation only; matching is exact
+ * on normalized headers. Source-specific quirks (e.g. SimplyHired `role` =
+ * employment type, not title) are handled by preferring `title` for jobTitle
+ * and leaving `role` unmapped unless no title column exists — see
+ * SOURCE_MAPPING_PRESETS.
+ */
 export const CSV_COLUMN_ALIASES: Record<string, string[]> = {
   companyName: [
     "company",
@@ -83,9 +90,9 @@ export const CSV_COLUMN_ALIASES: Record<string, string[]> = {
     "title",
     "job_title",
     "job title",
-    "role",
     "position",
     "job",
+    "role",
   ],
   jobUrl: [
     "url",
@@ -97,7 +104,16 @@ export const CSV_COLUMN_ALIASES: Record<string, string[]> = {
     "source_url",
   ],
   source: ["source", "board", "job_board", "job board", "origin"],
-  location: ["location", "city", "region", "geo"],
+  location: [
+    "location",
+    "city",
+    "region",
+    "geo",
+    "work_location",
+    "work location",
+    "job_location",
+    "job location",
+  ],
   contactName: [
     "contact",
     "contact_name",
@@ -127,7 +143,37 @@ export const CSV_COLUMN_ALIASES: Record<string, string[]> = {
     "date",
     "posted_at",
     "posted",
+    "posting_time",
+    "posting time",
+    "posted_time",
+    "date_posted",
+    "date posted",
   ],
+};
+
+/** Deterministic per-source header → field maps (no LLM). */
+export const SOURCE_MAPPING_PRESETS: Record<
+  string,
+  Record<string, string>
+> = {
+  simplyhired: {
+    title: "jobTitle",
+    company_name: "companyName",
+    work_location: "location",
+    posting_time: "discoveredAt",
+  },
+  greenhouse: {
+    "Company Name": "companyName",
+    "Job Title": "jobTitle",
+    "Job URL": "jobUrl",
+    Source: "source",
+    Location: "location",
+    "Contact Name": "contactName",
+    Email: "contactEmail",
+    LinkedIn: "contactLinkedIn",
+    "Contact Title": "contactTitle",
+    Discovered: "discoveredAt",
+  },
 };
 
 export const CANONICAL_CSV_FIELDS = [

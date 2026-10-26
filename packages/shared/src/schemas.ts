@@ -93,3 +93,22 @@ export const createContactMethodSchema = z.object({
   value: z.string().min(1).max(500),
   isPrimary: z.boolean().optional(),
 });
+
+export const scheduleFollowUpSchema = z.object({
+  enrollmentId: z.string().uuid(),
+  channel: z.enum(Channels),
+  actionType: z.string().min(1).max(100).default("email_followup"),
+  dueAt: z.string().datetime(),
+  stepId: z.string().uuid().optional(),
+  senderIdentityId: z.string().uuid().optional(),
+  payload: z.record(z.unknown()).optional(),
+  requiresApproval: z.boolean().optional(),
+  idempotencyKey: z.string().max(200).optional(),
+});
+
+export const followUpActionSchema = z.object({
+  actionId: z.string().uuid(),
+  note: z.string().max(2000).optional(),
+  dueAt: z.string().datetime().optional(),
+  reason: z.string().max(500).optional(),
+});

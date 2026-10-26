@@ -1,0 +1,19 @@
+{
+  "name": "smartreach",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @smartreach/web dev",
+    "dev:worker": "pnpm --filter @smartreach/worker dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "db:generate": "pnpm --filter @smartreach/db generate",
+    "db:migrate": "pnpm --filter @smartreach/db migrate",
+    "db:seed": "pnpm --filter @smartreach/db seed",
+    "db:studio": "pnpm --filter @smartreach/db studio"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
